@@ -179,7 +179,7 @@ AI 原生意味着：**AI 不是功能，是地基。** 从产品设计、数据
 
 📎 **GitHub**: [ra1nzzz/Dust-Mirror](https://github.com/ra1nzzz/Dust-Mirror)
 💻 **技术栈**: Python / FastAPI / SQLite / LLM
-🏠 **运行环境**: 本地部署，支持 macOS / Windows / Linux
+🏠 **运行环境**: 本地部署，支持 macOS(暂未发布) / Windows 
 📄 **许可证**: PolyForm Noncommercial 1.0.0（非商业免费使用）
 
 ---
