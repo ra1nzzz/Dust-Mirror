@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ra1nzzz/Dust-Mirror/governance/schemas/receipt.schema.json",
+  "title": "DustMirror threshold-signed execution receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "statement", "signatures"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "statement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ledger_repository", "stream", "receipt_id", "kind", "approval_id",
+        "approval_record_sha256", "nonce", "issued_at", "approval_expires_at",
+        "action", "status", "source_repository", "source_repository_id",
+        "source_revision", "source_tree", "workflow_path", "workflow_blob_sha",
+        "workflow_run_id", "workflow_run_attempt", "target_repository",
+        "target_repository_id", "target_ref", "target_commit", "target_tree",
+        "target_pull_request_number", "target_release_id", "version", "tag",
+        "artifact", "policy_epoch", "policy_sha256"
+      ],
+      "properties": {
+        "ledger_repository": {"const": "ra1nzzz/Dust-Mirror"},
+        "stream": {"enum": ["sync:dustmirror", "release:free", "release:pro"]},
+        "receipt_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{7,127}$"},
+        "kind": {"enum": ["sync", "release_free", "release_pro"]},
+        "approval_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{7,127}$"},
+        "approval_record_sha256": {"$ref": "approval.schema.json#/$defs/sha256"},
+        "nonce": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+        "issued_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
+        "approval_expires_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
+        "action": {"enum": ["sync_pr_opened", "release_free_published", "release_pro_published"]},
+        "status": {"const": "succeeded"},
+        "source_repository": {"type": "string"},
+        "source_repository_id": {"type": "integer", "minimum": 1},
+        "source_revision": {"$ref": "approval.schema.json#/$defs/git_sha"},
+        "source_tree": {"$ref": "approval.schema.json#/$defs/git_sha"},
+        "workflow_path": {"type": "string", "pattern": "^\\.github/workflows/[A-Za-z0-9._/-]+\\.ya?ml$"},
+        "workflow_blob_sha": {"$ref": "approval.schema.json#/$defs/git_sha"},
+        "workflow_run_id": {"type": "integer", "minimum": 1},
+        "workflow_run_attempt": {"type": "integer", "minimum": 1},
+        "target_repository": {"type": "string"},
+        "target_repository_id": {"type": "integer", "minimum": 1},
+        "target_ref": {"type": "string", "pattern": "^refs/(heads|tags)/"},
+        "target_commit": {"$ref": "approval.schema.json#/$defs/git_sha"},
+        "target_tree": {"$ref": "approval.schema.json#/$defs/git_sha"},
+        "target_pull_request_number": {"type": ["integer", "null"], "minimum": 1},
+        "target_release_id": {"type": ["integer", "null"], "minimum": 1},
+        "version": {"type": "string"},
+        "tag": {"type": ["string", "null"]},
+        "artifact": {"$ref": "approval.schema.json#/$defs/artifact"},
+        "policy_epoch": {"type": "integer", "minimum": 1},
+        "policy_sha256": {"$ref": "approval.schema.json#/$defs/sha256"}
+      }
+    },
+    "signatures": {
+      "type": "array",
+      "minItems": 2,
+      "uniqueItems": true,
+      "items": {"$ref": "approval.schema.json#/$defs/signature"}
+    }
+  }
+}

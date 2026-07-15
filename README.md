@@ -2,6 +2,10 @@
 
 > 一个 AI 原生的个人数据洞察与数字分身平台，从你的聊天记录里，看见你自己。
 
+> 仓库治理说明：本仓库同时承载 GitHub Free 模式下的公开信任账本。
+> 私有源码仓、tag 和 Release 仅提供候选或传输；同步、FREE/PRO 发布及客户端安装
+> 必须通过 [`governance/README.md`](governance/README.md) 定义的多签批准与摘要校验。
+
 ---
 
 ## 你有多少个群？

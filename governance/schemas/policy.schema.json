@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ra1nzzz/Dust-Mirror/governance/schemas/policy.schema.json",
+  "title": "DustMirror GitHub-Free governance policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "kind", "canonicalization", "policy_epoch",
+    "activation_status", "ledger", "trust_root", "repositories",
+    "approval_kinds", "limits", "paths"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "kind": {"const": "dustmirror.governance-policy"},
+    "canonicalization": {"const": "dustmirror-cjson-v1"},
+    "policy_epoch": {"type": "integer", "minimum": 1},
+    "activation_status": {"enum": ["provisioning_required", "active"]},
+    "ledger": {"type": "object"},
+    "trust_root": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "threshold", "keys"],
+      "properties": {
+        "algorithm": {"const": "ed25519"},
+        "threshold": {"type": "integer", "minimum": 2},
+        "keys": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key_id", "algorithm", "public_key_b64", "status"],
+            "properties": {
+              "key_id": {"type": "string"},
+              "algorithm": {"const": "ed25519"},
+              "public_key_b64": {"type": "string"},
+              "status": {"enum": ["active", "revoked"]}
+            }
+          }
+        }
+      }
+    },
+    "repositories": {"type": "object", "minProperties": 4},
+    "approval_kinds": {"type": "object", "minProperties": 3},
+    "limits": {"type": "object"},
+    "paths": {"type": "object"}
+  }
+}

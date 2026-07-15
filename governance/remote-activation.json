@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-07-15T00:00:00Z",
+  "status": "REMOTE_ACTIVATION_PENDING",
+  "ledger_repository": "ra1nzzz/Dust-Mirror",
+  "rulesets": [
+    {
+      "template": ".github/rulesets/ledger-main.json",
+      "required_remote_state": "active",
+      "bypass_actors": []
+    },
+    {
+      "template": ".github/rulesets/immutable-tags.json",
+      "required_remote_state": "active",
+      "bypass_actors": []
+    }
+  ],
+  "environments": {
+    "approval-verification": {
+      "required_reviewers": 1,
+      "prevent_self_review": true,
+      "prevent_admin_bypass": true,
+      "secrets": []
+    },
+    "sync-production": {
+      "required_reviewers": 1,
+      "prevent_self_review": true,
+      "prevent_admin_bypass": true,
+      "secrets": [
+        "SOURCE_READER_APP_ID",
+        "SOURCE_READER_APP_PRIVATE_KEY",
+        "SYNC_PROPOSER_APP_ID",
+        "SYNC_PROPOSER_APP_PRIVATE_KEY"
+      ]
+    },
+    "free-production": {
+      "required_reviewers": 1,
+      "prevent_self_review": true,
+      "prevent_admin_bypass": true,
+      "secrets": [
+        "PRODUCT_READER_APP_ID",
+        "PRODUCT_READER_APP_PRIVATE_KEY",
+        "FREE_PUBLISHER_APP_ID",
+        "FREE_PUBLISHER_APP_PRIVATE_KEY",
+        "OTA_SIGNING_KEY"
+      ]
+    },
+    "pro-production": {
+      "required_reviewers": 1,
+      "prevent_self_review": true,
+      "prevent_admin_bypass": true,
+      "secrets": [
+        "PRODUCT_READER_APP_ID",
+        "PRODUCT_READER_APP_PRIVATE_KEY",
+        "PRO_PUBLISHER_APP_ID",
+        "PRO_PUBLISHER_APP_PRIVATE_KEY"
+      ]
+    }
+  },
+  "github_apps": {
+    "source_reader": {
+      "repositories": ["ra1nzzz/DustMirror-Dev", "ra1nzzz/DustMirror"],
+      "permissions": {"metadata": "read", "contents": "read", "actions": "read", "checks": "read"}
+    },
+    "sync_proposer": {
+      "repositories": ["ra1nzzz/DustMirror"],
+      "permissions": {"metadata": "read", "contents": "write", "pull_requests": "write"}
+    },
+    "free_publisher": {
+      "repositories": ["ra1nzzz/Dust-Mirror"],
+      "permissions": {"metadata": "read", "contents": "write"}
+    },
+    "pro_publisher": {
+      "repositories": ["ra1nzzz/DustMirror-Pro-Get"],
+      "permissions": {"metadata": "read", "contents": "write"}
+    }
+  },
+  "forbidden_app_permissions": [
+    "administration",
+    "actions:write",
+    "environments:write",
+    "secrets:write",
+    "ruleset_bypass"
+  ],
+  "private_repository_secrets_to_remove_after_cutover": [
+    "CROSS_REPO_TOKEN",
+    "DUSTMIRROR_RELEASE_APP_PRIVATE_KEY",
+    "DUSTMIRROR_PRO_RELEASE_APP_PRIVATE_KEY",
+    "OTA_SIGNING_KEY"
+  ],
+  "required_negative_tests": [
+    "ledger_main_direct_push_rejected",
+    "ledger_main_force_push_rejected",
+    "ledger_tag_update_and_delete_rejected",
+    "author_self_review_rejected",
+    "unapproved_private_source_has_no_target_write",
+    "publisher_app_cannot_change_ledger_main_or_rulesets",
+    "replaced_free_or_pro_asset_rejected_by_digest",
+    "replayed_or_rollback_sequence_rejected"
+  ]
+}

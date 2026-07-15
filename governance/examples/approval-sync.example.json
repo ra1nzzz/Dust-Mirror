@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "statement": {
+    "ledger_repository": "ra1nzzz/Dust-Mirror",
+    "stream": "sync:dustmirror",
+    "approval_id": "sync-20260715-example-1",
+    "kind": "sync",
+    "sequence": 1,
+    "prev": "0000000000000000000000000000000000000000000000000000000000000000",
+    "nonce": "AQEBAQEBAQEBAQEBAQEBAQ",
+    "issued_at": "2026-07-15T00:00:00Z",
+    "expires_at": "2026-07-16T00:00:00Z",
+    "source_repository": "ra1nzzz/DustMirror-Dev",
+    "source_repository_id": 1256679149,
+    "source_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "source_tree": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "workflow_path": ".github/workflows/governance-ci.yml",
+    "workflow_blob_sha": "cccccccccccccccccccccccccccccccccccccccc",
+    "workflow_run_id": 123456789,
+    "workflow_run_attempt": 1,
+    "checks": [
+      {
+        "name": "governance",
+        "conclusion": "success",
+        "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "app_slug": "github-actions"
+      }
+    ],
+    "target_repository": "ra1nzzz/DustMirror",
+    "target_repository_id": 1267436574,
+    "target_ref": "refs/heads/master",
+    "target_base_revision": "dddddddddddddddddddddddddddddddddddddddd",
+    "target_base_tree": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "sync_manifest_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "ownership_catalog_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "operations_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "version": "1.2.3",
+    "tag": null,
+    "artifact": {
+      "name": "sync-plan.json",
+      "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "size_bytes": 1234
+    },
+    "policy_epoch": 1,
+    "policy_sha256": "2840f5e2534d926d817db959199c561788ec127149a85c5884260816e505ba36"
+  },
+  "signatures": [
+    {
+      "key_id": "offline-approver-01",
+      "algorithm": "ed25519",
+      "signature_b64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+    },
+    {
+      "key_id": "offline-approver-02",
+      "algorithm": "ed25519",
+      "signature_b64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+    }
+  ]
+}

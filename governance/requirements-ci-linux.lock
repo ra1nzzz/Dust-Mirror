@@ -1,0 +1,8 @@
+# CPython 3.11 / GitHub-hosted Ubuntu x86_64 only.
+# Regenerate in a reviewed dependency update; CI installs with --require-hashes.
+cryptography==45.0.7 \
+    --hash=sha256:16ede8a4f7929b4b7ff3642eba2bf79aa1d71f24ab6ee443935c0d269b6bc513
+cffi==1.17.1 \
+    --hash=sha256:610faea79c43e44c71e1ec53a554553fa22321b65fae24889706c0a84d4ad86d
+pycparser==2.22 \
+    --hash=sha256:c3702b6d3dd8c7abc1afa565d7e63d53a1d0bd86cdc24edd75470f4de499cfcc

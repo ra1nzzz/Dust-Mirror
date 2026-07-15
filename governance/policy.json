@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "kind": "dustmirror.governance-policy",
+  "canonicalization": "dustmirror-cjson-v1",
+  "policy_epoch": 1,
+  "activation_status": "provisioning_required",
+  "ledger": {
+    "repository": "ra1nzzz/Dust-Mirror",
+    "repository_id": 1267655184,
+    "default_branch": "main",
+    "visibility": "public"
+  },
+  "trust_root": {
+    "algorithm": "ed25519",
+    "threshold": 2,
+    "keys": []
+  },
+  "repositories": {
+    "dev": {
+      "repository": "ra1nzzz/DustMirror-Dev",
+      "repository_id": 1256679149,
+      "default_branch": "master",
+      "trust_role": "candidate_source"
+    },
+    "product": {
+      "repository": "ra1nzzz/DustMirror",
+      "repository_id": 1267436574,
+      "default_branch": "master",
+      "trust_role": "candidate_source"
+    },
+    "free_artifact": {
+      "repository": "ra1nzzz/Dust-Mirror",
+      "repository_id": 1267655184,
+      "default_branch": "main",
+      "trust_role": "ledger_and_untrusted_artifact_carrier"
+    },
+    "pro_artifact": {
+      "repository": "ra1nzzz/DustMirror-Pro-Get",
+      "repository_id": 1267436963,
+      "default_branch": "master",
+      "trust_role": "untrusted_artifact_carrier"
+    }
+  },
+  "approval_kinds": {
+    "sync": {
+      "stream": "sync:dustmirror",
+      "subject_role": "dev",
+      "target_role": "product",
+      "required_checks": [
+        "governance"
+      ]
+    },
+    "release_free": {
+      "stream": "release:free",
+      "subject_role": "product",
+      "target_role": "free_artifact",
+      "required_checks": [
+        "free-boundary",
+        "lint-and-test"
+      ]
+    },
+    "release_pro": {
+      "stream": "release:pro",
+      "subject_role": "product",
+      "target_role": "pro_artifact",
+      "required_checks": [
+        "free-boundary",
+        "lint-and-test"
+      ]
+    }
+  },
+  "limits": {
+    "max_approval_ttl_seconds": 604800,
+    "max_artifact_size_bytes": 1073741824,
+    "minimum_nonce_bytes": 16
+  },
+  "paths": {
+    "approvals": "governance/approvals",
+    "receipts": "governance/receipts"
+  }
+}
