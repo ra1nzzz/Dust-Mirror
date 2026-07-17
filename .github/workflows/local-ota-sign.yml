@@ -1,0 +1,59 @@
+name: Sign certified local OTA candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Exact stable product version"
+        required: true
+        type: string
+      source_sha:
+        description: "Exact merged source commit"
+        required: true
+        type: string
+      candidate_sha256:
+        description: "Expected SHA-256 from verified package evidence"
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  sign:
+    runs-on: [self-hosted, Windows, X64, dustmirror-artifact-local-sign]
+    steps:
+      - name: Verify evidence and sign local candidate
+        shell: powershell
+        env:
+          OTA_SIGNING_KEY: ${{ secrets.OTA_SIGNING_KEY }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          EXPECTED_SHA256: ${{ inputs.candidate_sha256 }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ($env:RELEASE_VERSION -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid stable version" }
+          if ($env:SOURCE_SHA -notmatch '^[0-9a-f]{40}$') { throw "Invalid source SHA" }
+          if ($env:EXPECTED_SHA256 -notmatch '^[0-9a-f]{64}$') { throw "Invalid candidate SHA-256" }
+          $shortSha = $env:SOURCE_SHA.Substring(0, 8)
+          $candidateDir = "D:\Code\DustMirror\release-out\v$($env:RELEASE_VERSION)-master-$shortSha"
+          $asset = Join-Path $candidateDir "DustMirror-v$($env:RELEASE_VERSION)-FREE-win64.zip"
+          $evidencePath = Join-Path $candidateDir "DustMirror-v$($env:RELEASE_VERSION)-FREE-package-evidence.json"
+          $sbomPath = Join-Path $candidateDir "DustMirror-v$($env:RELEASE_VERSION)-SBOM.spdx.json"
+          foreach ($path in @($asset, $evidencePath, $sbomPath)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required certified artifact is missing" }
+          }
+          $evidence = Get-Content -LiteralPath $evidencePath -Raw | ConvertFrom-Json
+          if ($evidence.status -ne "verified") { throw "Package evidence is not verified" }
+          $actualHash = (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -ne $env:EXPECTED_SHA256 -or $actualHash -ne $evidence.archive.sha256) {
+            throw "Candidate hash does not match the trusted inputs and evidence"
+          }
+          $sbom = Get-Content -LiteralPath $sbomPath -Raw | ConvertFrom-Json
+          if ($sbom.name -ne "DustMirror-$($env:RELEASE_VERSION)") { throw "SBOM version mismatch" }
+          if ($sbom.documentNamespace -notlike "*/$($env:SOURCE_SHA)") { throw "SBOM source SHA mismatch" }
+          if (-not $env:OTA_SIGNING_KEY) { throw "OTA signing secret is unavailable" }
+          $signer = "D:\Code\DustMirror\scripts\sign_ota_package.py"
+          & "C:\Program Files\Python312\python.exe" $signer $asset
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((Get-Item -LiteralPath "$asset.sig").Length -ne 64) { throw "Invalid Ed25519 signature size" }
+          Write-Host "Certified local OTA candidate signed and round-trip verified"
