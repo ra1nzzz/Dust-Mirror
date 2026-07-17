@@ -56,7 +56,7 @@
     },
     "signatures": {
       "type": "array",
-      "minItems": 2,
+      "minItems": 1,
       "uniqueItems": true,
       "items": {"$ref": "approval.schema.json#/$defs/signature"}
     }

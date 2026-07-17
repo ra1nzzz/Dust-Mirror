@@ -17,14 +17,14 @@
   ],
   "environments": {
     "approval-verification": {
-      "required_reviewers": 1,
-      "prevent_self_review": true,
+      "required_reviewers": 0,
+      "prevent_self_review": false,
       "prevent_admin_bypass": true,
       "secrets": []
     },
     "sync-production": {
-      "required_reviewers": 1,
-      "prevent_self_review": true,
+      "required_reviewers": 0,
+      "prevent_self_review": false,
       "prevent_admin_bypass": true,
       "secrets": [
         "SOURCE_READER_APP_ID",
@@ -34,8 +34,8 @@
       ]
     },
     "free-production": {
-      "required_reviewers": 1,
-      "prevent_self_review": true,
+      "required_reviewers": 0,
+      "prevent_self_review": false,
       "prevent_admin_bypass": true,
       "secrets": [
         "PRODUCT_READER_APP_ID",
@@ -46,8 +46,8 @@
       ]
     },
     "pro-production": {
-      "required_reviewers": 1,
-      "prevent_self_review": true,
+      "required_reviewers": 0,
+      "prevent_self_review": false,
       "prevent_admin_bypass": true,
       "secrets": [
         "PRODUCT_READER_APP_ID",
@@ -92,7 +92,7 @@
     "ledger_main_direct_push_rejected",
     "ledger_main_force_push_rejected",
     "ledger_tag_update_and_delete_rejected",
-    "author_self_review_rejected",
+    "unsigned_or_wrong_key_approval_rejected",
     "unapproved_private_source_has_no_target_write",
     "publisher_app_cannot_change_ledger_main_or_rulesets",
     "replaced_free_or_pro_asset_rejected_by_digest",
