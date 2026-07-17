@@ -40,11 +40,29 @@ class RepositoryControlTests(unittest.TestCase):
         ]
         self.assertEqual(checks, ["ledger-static"])
 
-    def test_checked_in_trust_root_is_explicitly_unprovisioned(self) -> None:
+    def test_checked_in_trust_root_supports_single_maintainer_activation(self) -> None:
         policy = json.loads((ROOT / "governance" / "policy.json").read_text(encoding="utf-8"))
         self.assertEqual(policy["activation_status"], "provisioning_required")
         self.assertEqual(policy["trust_root"]["threshold"], 2)
         self.assertEqual(policy["trust_root"]["keys"], [])
+
+        schema = json.loads(
+            (ROOT / "governance" / "schemas" / "policy.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            schema["properties"]["trust_root"]["properties"]["threshold"]["minimum"],
+            1,
+        )
+
+        main = json.loads(
+            (ROOT / ".github" / "rulesets" / "ledger-main.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        pull_request = next(rule for rule in main["rules"] if rule["type"] == "pull_request")
+        self.assertEqual(pull_request["parameters"]["required_approving_review_count"], 0)
 
 
 if __name__ == "__main__":

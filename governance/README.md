@@ -5,12 +5,11 @@ The private `DustMirror-Dev`, `DustMirror`, and `DustMirror-Pro-Get`
 repositories are candidate source or artifact carriers: their default branches,
 tags, releases, and workflow results are not trusted by themselves.
 
-**Current state: `REMOTE_ACTIVATION_PENDING`.** `policy.json` deliberately has
-`activation_status=provisioning_required`, threshold 2, and no public keys.
-This makes the repository safe to merge before key ceremony: schema and tests
-work, but every approval, receipt, sync, publish, OTA, and PRO install must fail
-closed until two real offline Ed25519 public keys are reviewed and activated.
-Test keys in `tests/` are never a production trust root.
+DustMirror uses a single-maintainer trust model: one dedicated offline Ed25519
+governance key authorizes an exact statement. The key is separate from the OTA
+package-signing key. The public policy contains only the governance public key;
+the private key never enters this repository or GitHub Actions. Test keys in
+`tests/` are never a production trust root.
 
 A source revision becomes eligible for synchronization or publication only
 when an approval record for its exact commit and tree SHA is merged into this
@@ -38,7 +37,7 @@ asset is rejected when its digest does not match the public approval/receipt.
 2. A maintainer creates one JSON record under
    `governance/approvals/<kind>/<approval-id>.json`.
 3. The public pull request is validated by trusted code from the ledger base
-   branch and reviewed by an independent collaborator.
+   branch. A second human approval is optional rather than a release blocker.
 4. Protected `main` accepts the record only after `ledger-static` succeeds and
    all review requirements pass.
 5. A protected public environment runs the corresponding workflow. It checks
@@ -78,12 +77,13 @@ CPython 3.11 dependency set from the hash-locked
 
 The initial activation is a dedicated PR containing only:
 
-- an active `governance/policy.json` with at least two independently held
-  Ed25519 public keys; and
+- an active `governance/policy.json` with one dedicated offline Ed25519 public
+  key and threshold 1; and
 - the identical immutable `governance/policies/epoch-1.json` snapshot.
 
-Do not generate or store private keys in this repository, Actions, a shared
-password manager entry, or the same device. After activation, every rotation
+Do not store the private key in this repository or GitHub Actions. Keep it in
+the maintainer's restricted local secrets directory with an offline backup.
+After activation, every rotation
 increments the epoch and adds exactly one immutable policy snapshot plus
 `governance/policy-transitions/epoch-N.json`, signed at the old threshold.
 Repository identities and ledger paths cannot be redirected by a rotation.
@@ -92,10 +92,9 @@ Repository identities and ledger paths cannot be redirected by a rotation.
 
 - Apply `.github/rulesets/ledger-main.json` and
   `.github/rulesets/immutable-tags.json` with no bypass actors.
-- Add an independent collaborator before requiring one approval; the PR author
-  cannot approve their own change.
 - Create `approval-verification`, `sync-production`, `free-production`, and
-  `pro-production` environments. Require a reviewer and disallow self-review.
+  `pro-production` environments. A second reviewer may be added later, but is
+  not required by the single-maintainer operating model.
 - Store only narrowly scoped GitHub App credentials in those environment
   secrets. Remove `CROSS_REPO_TOKEN`, release App keys, and `OTA_SIGNING_KEY`
   from the private repositories after migration.

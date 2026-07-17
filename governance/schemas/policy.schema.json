@@ -22,7 +22,7 @@
       "required": ["algorithm", "threshold", "keys"],
       "properties": {
         "algorithm": {"const": "ed25519"},
-        "threshold": {"type": "integer", "minimum": 2},
+        "threshold": {"type": "integer", "minimum": 1},
         "keys": {
           "type": "array",
           "uniqueItems": true,
