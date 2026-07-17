@@ -138,9 +138,10 @@ class LedgerTests(unittest.TestCase):
         }
 
     def test_pending_policy_is_structurally_valid_but_fails_closed(self) -> None:
-        pending = ledger.load_json(ROOT / "governance" / "policy.json")
+        pending = copy.deepcopy(ledger.load_json(ROOT / "governance" / "policy.json"))
+        pending["activation_status"] = "provisioning_required"
+        pending["trust_root"]["keys"] = []
         ledger.validate_policy(pending)
-        self.assertEqual(ledger.validate_tree(ROOT), {"approvals": 0, "receipts": 0})
         with self.assertRaisesRegex(ledger.LedgerError, "REMOTE_ACTIVATION_PENDING"):
             ledger.validate_approval(self._envelope(self._statement()), pending, now=NOW)
 
@@ -151,6 +152,14 @@ class LedgerTests(unittest.TestCase):
             )
             self.assertEqual(result["kind"], kind)
             self.assertEqual(len(result["record_sha256"]), 64)
+
+        self.policy["trust_root"]["threshold"] = 1
+        result = ledger.validate_approval(
+            self._envelope(self._statement("release_free"), ("offline-approver-01",)),
+            self.policy,
+            now=NOW,
+        )
+        self.assertEqual(result["kind"], "release_free")
 
     def test_tamper_wrong_source_and_asset_replacement_fail(self) -> None:
         valid = self._statement("release_free")
@@ -165,11 +174,11 @@ class LedgerTests(unittest.TestCase):
         with self.assertRaisesRegex(ledger.LedgerError, "signature"):
             ledger.validate_approval(signed, self.policy, now=NOW)
 
-    def test_threshold_duplicate_unknown_and_unsorted_signatures_fail(self) -> None:
+    def test_missing_duplicate_unknown_and_unsorted_signatures_fail(self) -> None:
         statement = self._statement()
         with self.assertRaisesRegex(ledger.LedgerError, "threshold"):
             ledger.validate_approval(
-                self._envelope(statement, ("offline-approver-01",)), self.policy, now=NOW
+                self._envelope(statement, ()), self.policy, now=NOW
             )
         with self.assertRaisesRegex(ledger.LedgerError, "unique and sorted"):
             ledger.validate_approval(

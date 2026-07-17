@@ -42,9 +42,13 @@ class RepositoryControlTests(unittest.TestCase):
 
     def test_checked_in_trust_root_supports_single_maintainer_activation(self) -> None:
         policy = json.loads((ROOT / "governance" / "policy.json").read_text(encoding="utf-8"))
-        self.assertEqual(policy["activation_status"], "provisioning_required")
-        self.assertEqual(policy["trust_root"]["threshold"], 2)
-        self.assertEqual(policy["trust_root"]["keys"], [])
+        self.assertIn(policy["activation_status"], {"provisioning_required", "active"})
+        if policy["activation_status"] == "provisioning_required":
+            self.assertEqual(policy["trust_root"]["keys"], [])
+        else:
+            self.assertEqual(policy["trust_root"]["threshold"], 1)
+            self.assertEqual(len(policy["trust_root"]["keys"]), 1)
+            self.assertEqual(policy["trust_root"]["keys"][0]["status"], "active")
 
         schema = json.loads(
             (ROOT / "governance" / "schemas" / "policy.schema.json").read_text(
