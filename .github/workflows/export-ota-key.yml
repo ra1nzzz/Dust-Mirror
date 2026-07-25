@@ -1,0 +1,26 @@
+name: Export OTA Signing Key (temporary)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write secret to file
+        env:
+          OTA_SIGNING_KEY: ${{ secrets.OTA_SIGNING_KEY }}
+        run: |
+          printf "%s" "$OTA_SIGNING_KEY" > ota_signing_key.pem
+          echo "Key size: $(wc -c < ota_signing_key.pem) bytes"
+
+      - name: Upload as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ota-signing-key
+          path: ota_signing_key.pem
+          retention-days: 1
