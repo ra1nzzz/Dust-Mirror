@@ -1,0 +1,73 @@
+main:
+  api_trigger_publish_windows_release:
+    - lock:
+        key: dustmirror-public-windows-release
+        expires: 72000
+        wait: true
+        timeout: 72000
+      stages:
+        - name: Refuse non-Product trigger or malformed identity
+          script: |
+            set -eu
+            test "$CNB_REPO_SLUG" = "yitaocn/dust-mirror"
+            test "$API_TRIGGER_REPO_SLUG" = "yitaocn/dustmirror"
+            echo "$RELEASE_VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'
+            echo "$PRODUCT_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
+            test -n "$PRODUCT_BUILD_ID"
+        - name: Download the private signed handoff from the exact Product commit
+          image: cnbcool/attachments@sha256:37c2d53fed9accee6ea0a509a05a4d05e4b36af37d5319451c2284e287b9e935
+          settings:
+            type: DOWNLOAD
+            slug: yitaocn/dustmirror
+            commit: $PRODUCT_COMMIT
+            attachments:
+              - DustMirror-$RELEASE_VERSION-FREE-win64.zip
+              - DustMirror-$RELEASE_VERSION-GUI-win64.zip
+              - manifest.json
+              - manifest.sig
+              - trust.json
+              - trust.sig
+              - publication-authorization.json
+              - publication-authorization.sig
+        - name: Verify authorization and reject replay or downgrade before creating a Release
+          timeout: 10m
+          script: |
+            set -eu
+            python3 -m pip install --disable-pip-version-check -r requirements-release-ci.txt
+            python3 scripts/verify_publication_authorization.py --authorization publication-authorization.json --signature publication-authorization.sig --publication-public-key-b64 "$DUSTMIRROR_PUBLICATION_PUBLIC_KEY_B64" --expected-tag "$RELEASE_VERSION" --expected-product-build-id "$PRODUCT_BUILD_ID" --expected-cnb-repo "$CNB_REPO_SLUG" --expected-release-commit "$CNB_COMMIT" --expected-release-tree "$(git rev-parse 'HEAD^{tree}')" --manifest manifest.json --manifest-signature manifest.sig --trust-metadata trust.json --trust-signature trust.sig --free-bundle "DustMirror-${RELEASE_VERSION}-FREE-win64.zip" --gui-bundle "DustMirror-${RELEASE_VERSION}-GUI-win64.zip"
+            python3 scripts/verify_cnb_release_state.py --mode preflight --tag "$RELEASE_VERSION" --repo "$CNB_REPO_SLUG"
+        - name: Create a non-latest prerelease only after authorization succeeds
+          type: git:release
+          options:
+            tag: $RELEASE_VERSION
+            title: DustMirror $RELEASE_VERSION
+            description: "通过 Product 签名授权，等待公开仓完整资产复核。Product build: $PRODUCT_BUILD_ID"
+            preRelease: true
+            latest: false
+        - name: Upload only the eight authorized files
+          image: cnbcool/attachments@sha256:37c2d53fed9accee6ea0a509a05a4d05e4b36af37d5319451c2284e287b9e935
+          settings:
+            tag: $RELEASE_VERSION
+            attachments:
+              - DustMirror-*-FREE-win64.zip
+              - DustMirror-*-GUI-win64.zip
+              - manifest.json
+              - manifest.sig
+              - trust.json
+              - trust.sig
+              - publication-authorization.json
+              - publication-authorization.sig
+        - name: Reject any missing, duplicate or extra prerelease attachment
+          script: |
+            set -eu
+            python3 scripts/verify_cnb_release_inventory.py --authorization publication-authorization.json --tag "$RELEASE_VERSION" --repo "$CNB_REPO_SLUG" --product-build-id "$PRODUCT_BUILD_ID"
+        - name: Promote only the verified prerelease through the durable anti-replay saga
+          timeout: 1h
+          script: |
+            set -eu
+            python3 scripts/release_coordinator_client.py --authorization publication-authorization.json --authorization-signature publication-authorization.sig --output publication-saga-receipt.json --timeout-seconds 1800
+        - name: Read back the live CNB latest state and complete inventory
+          script: |
+            set -eu
+            python3 scripts/verify_cnb_release_state.py --mode postflight --tag "$RELEASE_VERSION" --repo "$CNB_REPO_SLUG"
+            python3 scripts/verify_cnb_release_inventory.py --authorization publication-authorization.json --tag "$RELEASE_VERSION" --repo "$CNB_REPO_SLUG" --product-build-id "$PRODUCT_BUILD_ID"
