@@ -1,4 +1,4 @@
-"""Publish the already-authorized CNB release to the GitHub mirror.
+"""Stage, promote, verify, or roll back the GitHub release mirror.
 
 This is deliberately a thin, fail-closed mirror step.  CNB remains the
 primary release host and the signed publication authorization is verified by
@@ -135,7 +135,7 @@ def _create_draft(tag: str, token: str) -> dict:
     )
 
 
-def _publish(release: dict, token: str) -> dict:
+def _patch_release(release: dict, token: str, value: dict) -> dict:
     release_id = release.get("id")
     if not isinstance(release_id, int):
         raise ValueError("github_release_id_invalid")
@@ -143,70 +143,138 @@ def _publish(release: dict, token: str) -> dict:
         f"{GITHUB_API}/repos/{GITHUB_REPOSITORY}/releases/{release_id}",
         token,
         method="PATCH",
-        value={"draft": False, "prerelease": False, "make_latest": "true"},
+        value=value,
     )
 
 
-def sync(tag: str, asset_dir: Path, token: str) -> dict:
+def _publish(release: dict, token: str) -> dict:
+    return _patch_release(
+        release,
+        token,
+        {"draft": False, "prerelease": False, "make_latest": "true"},
+    )
+
+
+def _unpublish(release: dict, token: str) -> dict:
+    return _patch_release(
+        release,
+        token,
+        {"draft": True, "prerelease": True, "make_latest": "false"},
+    )
+
+
+def _expected_assets(tag: str, asset_dir: Path) -> tuple[list[Path], dict[str, dict]]:
     expected_paths = [asset_dir / template.format(tag=tag) for template in ASSET_NAMES]
     if any(not path.is_file() for path in expected_paths):
         missing = [path.name for path in expected_paths if not path.is_file()]
         raise ValueError("github_mirror_asset_missing:" + ",".join(missing))
-    expected = {path.name: local_asset(path) for path in expected_paths}
+    return expected_paths, {path.name: local_asset(path) for path in expected_paths}
+
+
+def _upload_missing_assets(
+    release: dict,
+    expected_paths: list[Path],
+    expected: dict[str, dict],
+    token: str,
+) -> dict[str, dict]:
+    assets = release.get("assets")
+    if not isinstance(assets, list) or any(not isinstance(item, dict) for item in assets):
+        raise ValueError("github_release_assets_invalid")
+    existing = {item.get("name"): item for item in assets}
+    if any(not isinstance(name, str) for name in existing):
+        raise ValueError("github_release_asset_name_invalid")
+    if not set(existing).issubset(expected):
+        raise ValueError("github_release_existing_asset_set_mismatch")
+    for name, remote in existing.items():
+        content = _download_asset(remote, token)
+        wanted = expected[name]
+        if len(content) != wanted["size_bytes"] or sha256_bytes(content) != wanted["sha256"]:
+            raise ValueError(f"github_release_existing_asset_digest_mismatch:{name}")
+    for path in expected_paths:
+        if path.name in existing:
+            continue
+        _request(
+            _asset_url(release, path.name),
+            token,
+            method="POST",
+            body=path.read_bytes(),
+            content_type="application/octet-stream",
+        )
+    refreshed = _get_release(str(release.get("tag_name") or ""), token)
+    if refreshed is None:
+        raise ValueError("github_release_disappeared")
+    return _validate_remote_assets(refreshed, expected, token)
+
+
+def _receipt(tag: str, release: dict, state: str, assets: dict[str, dict]) -> dict:
+    return {
+        "schema": "dustmirror.github-mirror-receipt.v1",
+        "repository": GITHUB_REPOSITORY,
+        "tag": tag,
+        "release_id": release.get("id"),
+        "state": state,
+        "assets": assets,
+        "checked_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+
+
+def stage(tag: str, asset_dir: Path, token: str) -> dict:
+    """Upload and re-download exact bytes while keeping GitHub non-public."""
+    expected_paths, expected = _expected_assets(tag, asset_dir)
 
     release = _get_release(tag, token)
     if release is None:
         release = _create_draft(tag, token)
     if release.get("tag_name") != tag:
         raise ValueError("github_release_tag_mismatch")
-    already_published = release.get("draft") is False and release.get("prerelease") is False
-    if already_published:
-        remote_assets = _validate_remote_assets(release, expected, token)
-    else:
-        # Never replace an existing same-name asset with different bytes.
-        existing = {item.get("name"): item for item in release.get("assets", []) if isinstance(item, dict)}
-        for name, wanted in expected.items():
-            if name in existing:
-                remote_assets = _validate_remote_assets(release, expected, token)
-                break
-        else:
-            remote_assets = {}
-        if remote_assets:
-            pass
-        else:
-            if existing and set(existing) != set(expected):
-                raise ValueError("github_release_existing_asset_set_mismatch")
-            for path in expected_paths:
-                _request(
-                    _asset_url(release, path.name),
-                    token,
-                    method="POST",
-                    body=path.read_bytes(),
-                    content_type="application/octet-stream",
-                )
-            release = _get_release(tag, token)
-            if release is None:
-                raise ValueError("github_release_disappeared")
-            remote_assets = _validate_remote_assets(release, expected, token)
-        if not already_published:
-            release = _publish(release, token)
-            if release.get("draft") is not False or release.get("prerelease") is not False:
-                raise ValueError("github_release_publish_failed")
-            remote_assets = _validate_remote_assets(release, expected, token)
+    if release.get("draft") is not True or release.get("prerelease") is not True:
+        raise ValueError("github_stage_requires_draft_prerelease")
+    remote_assets = _upload_missing_assets(release, expected_paths, expected, token)
+    return _receipt(tag, release, "staged", remote_assets)
 
-    return {
-        "schema": "dustmirror.github-mirror-receipt.v1",
-        "repository": GITHUB_REPOSITORY,
-        "tag": tag,
-        "release_id": release.get("id"),
-        "state": "published",
-        "assets": remote_assets,
-        "checked_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-    }
+
+def promote(tag: str, asset_dir: Path, token: str) -> dict:
+    """Publish a previously byte-verified draft; never upload in this step."""
+    _, expected = _expected_assets(tag, asset_dir)
+    release = _get_release(tag, token)
+    if release is None or release.get("tag_name") != tag:
+        raise ValueError("github_staged_release_missing")
+    remote_assets = _validate_remote_assets(release, expected, token)
+    if release.get("draft") is True and release.get("prerelease") is True:
+        release = _publish(release, token)
+    if release.get("draft") is not False or release.get("prerelease") is not False:
+        raise ValueError("github_release_publish_failed")
+    remote_assets = _validate_remote_assets(release, expected, token)
+    return _receipt(tag, release, "published", remote_assets)
+
+
+def verify_published(tag: str, asset_dir: Path, token: str) -> dict:
+    _, expected = _expected_assets(tag, asset_dir)
+    release = _get_release(tag, token)
+    if release is None or release.get("tag_name") != tag:
+        raise ValueError("github_published_release_missing")
+    if release.get("draft") is not False or release.get("prerelease") is not False:
+        raise ValueError("github_release_not_published")
+    return _receipt(tag, release, "published", _validate_remote_assets(release, expected, token))
+
+
+def rollback(tag: str, token: str) -> dict:
+    """Make a partially promoted mirror non-public without deleting its tag."""
+    release = _get_release(tag, token)
+    if release is None:
+        return _receipt(tag, {}, "absent", {})
+    if release.get("tag_name") != tag:
+        raise ValueError("github_release_tag_mismatch")
+    if release.get("draft") is not True or release.get("prerelease") is not True:
+        release = _unpublish(release, token)
+    if release.get("draft") is not True or release.get("prerelease") is not True:
+        raise ValueError("github_release_rollback_failed")
+    return _receipt(tag, release, "rolled_back", {})
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=("stage", "promote", "verify", "rollback"), required=True)
     parser.add_argument("--tag", default=os.environ.get("RELEASE_VERSION", ""))
     parser.add_argument("--asset-dir", type=Path, default=Path("."))
     parser.add_argument("--output", type=Path, default=Path("github-mirror-receipt.json"))
@@ -215,9 +283,16 @@ def main() -> int:
         token = os.environ.get("GITHUB_TOKEN", "")
         if not token or not isinstance(args.tag, str) or not args.tag.startswith("v"):
             raise ValueError("github_mirror_environment_missing")
-        receipt = sync(args.tag, args.asset_dir, token)
+        if args.mode == "stage":
+            receipt = stage(args.tag, args.asset_dir, token)
+        elif args.mode == "promote":
+            receipt = promote(args.tag, args.asset_dir, token)
+        elif args.mode == "verify":
+            receipt = verify_published(args.tag, args.asset_dir, token)
+        else:
+            receipt = rollback(args.tag, token)
         args.output.write_bytes(canonical(receipt))
-        print(json.dumps({"verified": True, "repository": GITHUB_REPOSITORY, "tag": args.tag}, sort_keys=True))
+        print(json.dumps({"verified": True, "repository": GITHUB_REPOSITORY, "tag": args.tag, "state": receipt["state"]}, sort_keys=True))
         return 0
     except Exception as exc:
         print(json.dumps({"verified": False, "error": str(exc)}, sort_keys=True))
