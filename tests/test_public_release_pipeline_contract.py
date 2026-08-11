@@ -10,7 +10,7 @@ def test_signed_verification_precedes_release_creation_and_latest_promotion():
     preflight = source.index("--mode preflight")
     create = source.index("Create a non-latest prerelease")
     inventory = source.index("verify_cnb_release_inventory.py")
-    promote = source.index("Promote only the verified prerelease")
+    promote = source.index("Promote CNB and synchronize the exact bytes")
     postflight = source.index("--mode postflight")
     assert verify < preflight < create < inventory < promote < postflight
 
