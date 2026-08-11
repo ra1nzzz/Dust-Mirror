@@ -10,9 +10,14 @@ def test_signed_verification_precedes_release_creation_and_latest_promotion():
     preflight = source.index("--mode preflight")
     create = source.index("Create a non-latest prerelease")
     inventory = source.index("verify_cnb_release_inventory.py")
-    promote = source.index("Promote only the verified prerelease")
+    promote = source.index("Promote the verified CNB release to latest")
+    mirror = source.index("Synchronize the exact CNB bytes to the GitHub release mirror")
     postflight = source.index("--mode postflight")
-    assert verify < preflight < create < inventory < promote < postflight
+    assert verify < preflight < create < inventory < promote < mirror < postflight
+    assert "release_coordinator_client.py" not in source
+    assert "DUSTMIRROR_RELEASE_COORDINATOR_ORIGIN" not in source
+    assert "sync_github_release.py" in source
+    assert "GITHUB_TOKEN" in source
 
 
 def test_release_plugin_is_digest_pinned_and_private_handoff_is_used():
