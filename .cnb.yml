@@ -1,6 +1,8 @@
 main:
   api_trigger_publish_windows_release:
-    - lock:
+    - imports:
+        - https://cnb.cool/yitaocn/dustmirror-release-secrets/-/blob/main/env.release.yml
+      lock:
         key: dustmirror-public-windows-release
         expires: 72000
         wait: true
@@ -61,16 +63,20 @@ main:
           script: |
             set -eu
             python3 scripts/verify_cnb_release_inventory.py --authorization publication-authorization.json --tag "$RELEASE_VERSION" --repo "$CNB_REPO_SLUG" --product-build-id "$PRODUCT_BUILD_ID"
-        - name: Promote CNB and synchronize the exact bytes to the GitHub release mirror
+        - name: Promote the verified CNB release to latest
+          type: git:release
+          options:
+            tag: $RELEASE_VERSION
+            preRelease: false
+            latest: true
+            overlying: true
+        - name: Synchronize the exact CNB bytes to the GitHub release mirror
           timeout: 1h
           script: |
             set -eu
-            # The coordinator is a release control-plane endpoint, not the
-            # DustMirror local GUI and not a public application URL.  It owns
-            # the CNB-primary -> GitHub-mirror saga and persists rollback/CAS
-            # state after this CNB job exits.
-            python3 scripts/release_coordinator_client.py --authorization publication-authorization.json --authorization-signature publication-authorization.sig --output publication-saga-receipt.json --timeout-seconds 1800
-            test -s publication-saga-receipt.json
+            test -n "$GITHUB_TOKEN"
+            python3 scripts/sync_github_release.py --tag "$RELEASE_VERSION" --output github-mirror-receipt.json
+            test -s github-mirror-receipt.json
         - name: Read back the live CNB latest state and complete inventory
           script: |
             set -eu
