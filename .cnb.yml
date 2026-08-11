@@ -37,7 +37,7 @@ main:
             set -eu
             python3 -m pip install --disable-pip-version-check -r requirements-release-ci.txt
             python3 scripts/verify_publication_authorization.py --authorization publication-authorization.json --signature publication-authorization.sig --publication-public-key-b64 "$DUSTMIRROR_PUBLICATION_PUBLIC_KEY_B64" --expected-tag "$RELEASE_VERSION" --expected-product-build-id "$PRODUCT_BUILD_ID" --expected-cnb-repo "$CNB_REPO_SLUG" --expected-release-commit "$CNB_COMMIT" --expected-release-tree "$(git rev-parse 'HEAD^{tree}')" --manifest manifest.json --manifest-signature manifest.sig --trust-metadata trust.json --trust-signature trust.sig --free-bundle "DustMirror-${RELEASE_VERSION}-FREE-win64.zip" --gui-bundle "DustMirror-${RELEASE_VERSION}-GUI-win64.zip"
-            python3 scripts/verify_cnb_release_state.py --mode preflight --tag "$RELEASE_VERSION" --repo "$CNB_REPO_SLUG"
+            python3 scripts/verify_cnb_release_state.py --mode preflight --tag "$RELEASE_VERSION" --repo "$CNB_REPO_SLUG" --output release-preflight-state.json
         - name: Create a non-latest prerelease only after authorization succeeds
           type: git:release
           options:
@@ -63,6 +63,13 @@ main:
           script: |
             set -eu
             python3 scripts/verify_cnb_release_inventory.py --authorization publication-authorization.json --tag "$RELEASE_VERSION" --repo "$CNB_REPO_SLUG" --product-build-id "$PRODUCT_BUILD_ID"
+        - name: Stage the exact bytes in a GitHub draft
+          timeout: 1h
+          script: |
+            set -eu
+            test -n "$GITHUB_TOKEN"
+            python3 scripts/sync_github_release.py --mode stage --tag "$RELEASE_VERSION" --output github-mirror-staged.json
+            test -s github-mirror-staged.json
         - name: Promote the verified CNB release to latest
           type: git:release
           options:
@@ -70,15 +77,32 @@ main:
             preRelease: false
             latest: true
             overlying: true
-        - name: Synchronize the exact CNB bytes to the GitHub release mirror
+        - name: Promote the already-verified GitHub draft
           timeout: 1h
           script: |
             set -eu
             test -n "$GITHUB_TOKEN"
-            python3 scripts/sync_github_release.py --tag "$RELEASE_VERSION" --output github-mirror-receipt.json
+            python3 scripts/sync_github_release.py --mode promote --tag "$RELEASE_VERSION" --output github-mirror-receipt.json
             test -s github-mirror-receipt.json
         - name: Read back the live CNB latest state and complete inventory
           script: |
             set -eu
             python3 scripts/verify_cnb_release_state.py --mode postflight --tag "$RELEASE_VERSION" --repo "$CNB_REPO_SLUG"
             python3 scripts/verify_cnb_release_inventory.py --authorization publication-authorization.json --tag "$RELEASE_VERSION" --repo "$CNB_REPO_SLUG" --product-build-id "$PRODUCT_BUILD_ID"
+            python3 scripts/sync_github_release.py --mode verify --tag "$RELEASE_VERSION" --output github-mirror-postflight.json
+        # CNB documents failStages as the failure-only compensation path.
+        # Never delete or move a tag: make a partially promoted candidate
+        # non-latest and restore the previously recorded CNB latest release.
+      failStages:
+        - name: Roll back any partially promoted public release
+          script: |
+            set +e
+            python3 scripts/sync_github_release.py --mode rollback --tag "$RELEASE_VERSION" --output github-mirror-rollback.json
+            github_status=$?
+            python3 scripts/rollback_cnb_release.py --tag "$RELEASE_VERSION" --repo "$CNB_REPO_SLUG" --product-build-id "$PRODUCT_BUILD_ID" --preflight-state release-preflight-state.json
+            cnb_status=$?
+            if [ "$github_status" -ne 0 ] || [ "$cnb_status" -ne 0 ]; then
+              echo "CRITICAL: public release compensation did not fully converge" >&2
+              exit 1
+            fi
+            echo "Candidate is non-latest on both public endpoints after failure"

@@ -7,6 +7,7 @@ import os
 import re
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 SEMVER = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 
@@ -42,6 +43,7 @@ def main() -> int:
     parser.add_argument("--mode", choices=("preflight", "postflight"), required=True)
     parser.add_argument("--tag", required=True)
     parser.add_argument("--repo", required=True)
+    parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     try:
         endpoint = os.environ.get("CNB_API_ENDPOINT", "").rstrip("/")
@@ -57,11 +59,27 @@ def main() -> int:
                 raise ValueError("release_tag_already_exists")
             if latest is not None and _version(args.tag) <= _version(_tag(latest)):
                 raise ValueError("release_version_not_newer_than_latest")
+            state = {
+                "schema": "dustmirror.cnb-release-preflight.v1",
+                "tag": args.tag,
+                "previous_latest_tag": _tag(latest) if isinstance(latest, dict) else None,
+                "previous_latest_id": latest.get("id") if isinstance(latest, dict) else None,
+            }
         else:
             if not isinstance(target, dict) or not isinstance(latest, dict):
                 raise ValueError("published_release_missing")
             if target.get("id") != latest.get("id") or _tag(target) != args.tag or _tag(latest) != args.tag:
                 raise ValueError("published_release_is_not_latest")
+            state = {
+                "schema": "dustmirror.cnb-release-postflight.v1",
+                "tag": args.tag,
+                "release_id": target.get("id"),
+            }
+        if args.output:
+            args.output.write_text(
+                json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                encoding="utf-8",
+            )
     except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         print(json.dumps({"verified": False, "error": str(exc)}, sort_keys=True))
         return 2
