@@ -180,13 +180,17 @@ def test_large_zip_io_is_streamed_with_heartbeat_and_bounded_retries():
     assert "path.read_bytes()" not in inspect.getsource(sync_github_release.local_asset)
 
 
-def test_release_runtime_is_preinstalled_and_exactly_version_pinned():
+def test_release_runtime_lock_and_live_verifier_are_welded_into_pipeline():
     from scripts import verify_release_runtime
 
-    receipt = verify_release_runtime.verify(ROOT)
-    assert receipt["cryptography"] == verify_release_runtime.EXPECTED_CRYPTOGRAPHY
-    assert str(ROOT.resolve()) not in receipt["cryptography_origin"]
-    assert set(receipt["packages"]) == {"cryptography", "cffi", "pycparser"}
-    for package in receipt["packages"].values():
-        assert package["verified_modules"] > 0
-        assert len(package["record_sha256"]) == 64
+    locked = verify_release_runtime._locked_requirements(
+        ROOT / "requirements-release-ci.txt"
+    )
+    assert set(locked) == {"cryptography", "cffi", "pycparser"}
+    assert all(locked.values())
+    pipeline = (ROOT / ".cnb.yml").read_text(encoding="utf-8")
+    assert "--only-binary=:all: --require-hashes" in pipeline
+    assert "scripts/verify_release_runtime.py --require-venv" in pipeline
+    source = inspect.getsource(verify_release_runtime)
+    assert "release_runtime_record_hash_mismatch" in source
+    assert "release_runtime_module_unhashed" in source
