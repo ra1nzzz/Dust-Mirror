@@ -81,6 +81,52 @@ def test_release_plugin_is_digest_pinned_and_private_handoff_is_used():
     ) < source.index("Create a non-latest prerelease")
 
 
+def test_only_protected_signer_can_trigger_and_all_signed_identities_are_required():
+    source = (ROOT / ".cnb.yml").read_text(encoding="utf-8")
+    assert 'test "$API_TRIGGER_REPO_SLUG" = "yitaocn/dustmirror-release-signer"' in source
+    assert 'test "$API_TRIGGER_REPO_SLUG" = "yitaocn/dustmirror"' not in source
+    for name in (
+        "PRODUCT_VERSION",
+        "PRODUCT_BUILD_ID",
+        "PRODUCT_COMMIT",
+        "PRODUCT_TREE",
+        "PRODUCT_HANDOFF_ATTACHMENT",
+        "PRODUCT_VERIFIER_EVIDENCE_ATTACHMENT",
+        "PRODUCT_REQUEST_SHA256",
+        "PRODUCT_RELEASE_LEDGER_COMMIT",
+        "PRODUCT_RELEASE_LEDGER_TREE",
+    ):
+        assert name in source
+    assert 'v*) normalized_version="$PRODUCT_VERSION"' in source
+    assert '*) normalized_version="v$PRODUCT_VERSION"' in source
+    assert "release_version: RELEASE_VERSION" in source
+    assert 'test "$CNB_COMMIT" = "$PRODUCT_RELEASE_LEDGER_COMMIT"' in source
+    assert 'test "$(git rev-parse \'HEAD^{tree}\')" = "$PRODUCT_RELEASE_LEDGER_TREE"' in source
+
+
+def test_handoff_and_independent_verifier_archive_are_exact_name_downloaded_and_verified():
+    pipeline = yaml.safe_load((ROOT / ".cnb.yml").read_text(encoding="utf-8"))
+    stages = pipeline["main"]["api_trigger_publish_windows_release"][0]["stages"]
+    download = next(
+        stage
+        for stage in stages
+        if stage["name"] == "Download the exact handoff and independent verifier evidence from Product"
+    )
+    assert download["settings"]["commit"] == "$PRODUCT_COMMIT"
+    assert download["settings"]["attachments"] == [
+        "$PRODUCT_HANDOFF_ATTACHMENT",
+        "$PRODUCT_VERIFIER_EVIDENCE_ATTACHMENT",
+    ]
+    source = (ROOT / ".cnb.yml").read_text(encoding="utf-8")
+    handoff = source.index("extract_product_candidate_handoff.py")
+    authorization = source.index("verify_publication_authorization.py")
+    verifier = source.index("verify_product_verifier_evidence.py")
+    preflight = source.index("--mode preflight")
+    assert handoff < authorization < verifier < preflight
+    assert '--expected-verifier-attachment "$PRODUCT_VERIFIER_EVIDENCE_ATTACHMENT"' in source
+    assert "--release-gate-manifest product-verification/release-gate-manifest.json" in source
+
+
 def test_release_secrets_are_stage_scoped_after_no_secret_runtime_bootstrap():
     pipeline = yaml.safe_load((ROOT / ".cnb.yml").read_text(encoding="utf-8"))
     job = pipeline["main"]["api_trigger_publish_windows_release"][0]

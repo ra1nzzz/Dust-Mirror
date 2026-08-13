@@ -6,18 +6,32 @@ main:
         wait: true
         timeout: 72000
       stages:
-        - name: Refuse non-Product trigger or malformed identity
+        - name: Refuse non-signer trigger and normalize the signed Product identity
           script: |
             set -eu
             test "$CNB_REPO_SLUG" = "yitaocn/dust-mirror"
-            test "$API_TRIGGER_REPO_SLUG" = "yitaocn/dustmirror"
-            echo "$RELEASE_VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'
+            test "$API_TRIGGER_REPO_SLUG" = "yitaocn/dustmirror-release-signer"
+            case "$PRODUCT_VERSION" in
+              v*) normalized_version="$PRODUCT_VERSION" ;;
+              *) normalized_version="v$PRODUCT_VERSION" ;;
+            esac
+            echo "$normalized_version" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
             echo "$PRODUCT_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
             echo "$PRODUCT_TREE" | grep -Eq '^[0-9a-f]{40}$'
             echo "$PRODUCT_BUILD_ID" | grep -Eq '^[A-Za-z0-9._-]{1,128}$'
+            echo "$PRODUCT_REQUEST_SHA256" | grep -Eq '^[0-9a-f]{64}$'
+            echo "$PRODUCT_RELEASE_LEDGER_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
+            echo "$PRODUCT_RELEASE_LEDGER_TREE" | grep -Eq '^[0-9a-f]{40}$'
+            test "$PRODUCT_HANDOFF_ATTACHMENT" = "DustMirror-candidate-handoff-$PRODUCT_BUILD_ID.zip"
+            test "$PRODUCT_VERIFIER_EVIDENCE_ATTACHMENT" = "DustMirror-verifier-evidence-$PRODUCT_REQUEST_SHA256.zip"
+            test "$CNB_COMMIT" = "$PRODUCT_RELEASE_LEDGER_COMMIT"
+            test "$(git rev-parse 'HEAD^{tree}')" = "$PRODUCT_RELEASE_LEDGER_TREE"
+            echo "##[set-output release_version=$normalized_version]"
             if [ -n "${PUBLICATION_RESUME_GRANT_ID:-}" ]; then
               echo "$PUBLICATION_RESUME_GRANT_ID" | grep -Eq '^[A-Za-z0-9._-]{1,128}$'
             fi
+          exports:
+            release_version: RELEASE_VERSION
         - name: Prepare the hash-locked verifier before importing any release secret
           timeout: 15m
           script: |
@@ -26,14 +40,15 @@ main:
             python3 -m venv .release-ci-venv
             ./.release-ci-venv/bin/python -m pip install --disable-pip-version-check --no-cache-dir --only-binary=:all: --require-hashes -r requirements-release-ci.txt
             ./.release-ci-venv/bin/python scripts/verify_release_runtime.py --require-venv
-        - name: Download the build-bound private handoff from the exact Product commit
+        - name: Download the exact handoff and independent verifier evidence from Product
           image: cnbcool/attachments@sha256:37c2d53fed9accee6ea0a509a05a4d05e4b36af37d5319451c2284e287b9e935
           settings:
             type: DOWNLOAD
             slug: yitaocn/dustmirror
             commit: $PRODUCT_COMMIT
             attachments:
-              - DustMirror-candidate-handoff-$PRODUCT_BUILD_ID.zip
+              - $PRODUCT_HANDOFF_ATTACHMENT
+              - $PRODUCT_VERIFIER_EVIDENCE_ATTACHMENT
         - name: Download a fresh signed resume-only grant when explicitly requested
           if: |
             [ -n "${PUBLICATION_RESUME_GRANT_ID:-}" ]
@@ -48,12 +63,12 @@ main:
         - name: Safely extract only the authorized public files from the closed handoff
           script: |
             set -eu
-            rm -rf public-handoff
-            mkdir public-handoff
-            ./.release-ci-venv/bin/python scripts/extract_product_candidate_handoff.py --archive "DustMirror-candidate-handoff-$PRODUCT_BUILD_ID.zip" --output-directory public-handoff --tag "$RELEASE_VERSION" --product-build-id "$PRODUCT_BUILD_ID" --product-commit "$PRODUCT_COMMIT" --product-tree "$PRODUCT_TREE"
+            rm -rf public-handoff product-verification
+            mkdir public-handoff product-verification
+            ./.release-ci-venv/bin/python scripts/extract_product_candidate_handoff.py --archive "$PRODUCT_HANDOFF_ATTACHMENT" --handoff-attachment "$PRODUCT_HANDOFF_ATTACHMENT" --output-directory public-handoff --verification-directory product-verification --tag "$RELEASE_VERSION" --product-build-id "$PRODUCT_BUILD_ID" --product-commit "$PRODUCT_COMMIT" --product-tree "$PRODUCT_TREE" --request-sha256 "$PRODUCT_REQUEST_SHA256" --release-ledger-commit "$PRODUCT_RELEASE_LEDGER_COMMIT" --release-ledger-tree "$PRODUCT_RELEASE_LEDGER_TREE"
             mv public-handoff/* .
             rmdir public-handoff
-            rm "DustMirror-candidate-handoff-$PRODUCT_BUILD_ID.zip"
+            rm "$PRODUCT_HANDOFF_ATTACHMENT"
             if [ -n "${PUBLICATION_RESUME_GRANT_ID:-}" ]; then
               mv "DustMirror-publication-resume-grant-$PUBLICATION_RESUME_GRANT_ID.json" publication-resume-grant.json
               mv "DustMirror-publication-resume-grant-$PUBLICATION_RESUME_GRANT_ID.sig" publication-resume-grant.sig
@@ -64,7 +79,7 @@ main:
         - name: Verify authorization and reject replay or downgrade before creating a Release
           imports:
             - https://cnb.cool/yitaocn/dustmirror-release-secrets/-/blob/main/env.release.yml
-          timeout: 10m
+          timeout: 1h
           script: |
             set -eu
             set --
@@ -73,7 +88,9 @@ main:
               test -s publication-resume-grant.sig
               set -- --resume-grant publication-resume-grant.json --resume-grant-signature publication-resume-grant.sig
             fi
-            ./.release-ci-venv/bin/python scripts/verify_publication_authorization.py --authorization publication-authorization.json --signature publication-authorization.sig --publication-public-key-b64 "$DUSTMIRROR_PUBLICATION_PUBLIC_KEY_B64" --expected-tag "$RELEASE_VERSION" --expected-product-build-id "$PRODUCT_BUILD_ID" --expected-product-commit "$PRODUCT_COMMIT" --expected-product-tree "$PRODUCT_TREE" --expected-cnb-repo "$CNB_REPO_SLUG" --expected-release-commit "$CNB_COMMIT" --expected-release-tree "$(git rev-parse 'HEAD^{tree}')" --manifest manifest.json --manifest-signature manifest.sig --trust-metadata trust.json --trust-signature trust.sig --free-bundle "DustMirror-${RELEASE_VERSION}-FREE-win64.zip" --gui-bundle "DustMirror-${RELEASE_VERSION}-GUI-win64.zip" --set-output "$@"
+            ./.release-ci-venv/bin/python scripts/verify_publication_authorization.py --authorization publication-authorization.json --signature publication-authorization.sig --publication-public-key-b64 "$DUSTMIRROR_PUBLICATION_PUBLIC_KEY_B64" --expected-tag "$RELEASE_VERSION" --expected-product-build-id "$PRODUCT_BUILD_ID" --expected-product-commit "$PRODUCT_COMMIT" --expected-product-tree "$PRODUCT_TREE" --expected-cnb-repo "$CNB_REPO_SLUG" --expected-release-commit "$PRODUCT_RELEASE_LEDGER_COMMIT" --expected-release-tree "$PRODUCT_RELEASE_LEDGER_TREE" --release-gate-manifest product-verification/release-gate-manifest.json --manifest manifest.json --manifest-signature manifest.sig --trust-metadata trust.json --trust-signature trust.sig --free-bundle "DustMirror-${RELEASE_VERSION}-FREE-win64.zip" --gui-bundle "DustMirror-${RELEASE_VERSION}-GUI-win64.zip" --set-output "$@"
+            ./.release-ci-venv/bin/python scripts/verify_product_verifier_evidence.py --signer-result product-verification/signer-result.json --signer-result-signature product-verification/signer-result.sig --release-gate-manifest product-verification/release-gate-manifest.json --verifier-evidence-manifest product-verification/verifier-evidence-manifest.json --verifier-archive "$PRODUCT_VERIFIER_EVIDENCE_ATTACHMENT" --publication-public-key-b64 "$DUSTMIRROR_PUBLICATION_PUBLIC_KEY_B64" --expected-tag "$RELEASE_VERSION" --expected-product-build-id "$PRODUCT_BUILD_ID" --expected-product-commit "$PRODUCT_COMMIT" --expected-product-tree "$PRODUCT_TREE" --expected-request-sha256 "$PRODUCT_REQUEST_SHA256" --expected-release-ledger-commit "$PRODUCT_RELEASE_LEDGER_COMMIT" --expected-release-ledger-tree "$PRODUCT_RELEASE_LEDGER_TREE" --expected-verifier-attachment "$PRODUCT_VERIFIER_EVIDENCE_ATTACHMENT"
+            rm -rf product-verification "$PRODUCT_VERIFIER_EVIDENCE_ATTACHMENT"
             ./.release-ci-venv/bin/python scripts/verify_cnb_release_state.py --mode preflight --tag "$RELEASE_VERSION" --repo "$CNB_REPO_SLUG" --product-build-id "$PRODUCT_BUILD_ID" --authorization publication-authorization.json --set-output
           exports:
             release_action: PUBLIC_RELEASE_ACTION

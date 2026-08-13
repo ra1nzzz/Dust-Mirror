@@ -55,6 +55,7 @@ def main() -> int:
     parser.add_argument("--trust-signature", type=Path, required=True)
     parser.add_argument("--free-bundle", type=Path, required=True)
     parser.add_argument("--gui-bundle", type=Path, required=True)
+    parser.add_argument("--release-gate-manifest", type=Path, required=True)
     parser.add_argument("--resume-grant", type=Path)
     parser.add_argument("--resume-grant-signature", type=Path)
     parser.add_argument("--set-output", action="store_true")
@@ -83,7 +84,11 @@ def main() -> int:
             raise ValueError("release_ledger_identity_invalid")
         if not isinstance(value.get("authorization_sequence"), int) or value["authorization_sequence"] < 1:
             raise ValueError("authorization_sequence_invalid")
-        if not HEX64.fullmatch(str(value.get("nonce") or "")) or not HEX64.fullmatch(str(value.get("release_gate_manifest_sha256") or "")):
+        gate_record = asset(args.release_gate_manifest)
+        if (
+            not HEX64.fullmatch(str(value.get("nonce") or ""))
+            or value.get("release_gate_manifest_sha256") != gate_record["sha256"]
+        ):
             raise ValueError("authorization_nonce_or_gate_invalid")
         expected_controls = {
             "manifest.json": asset(args.manifest),

@@ -32,6 +32,7 @@ def _run(
     issued_offset: timedelta = timedelta(0),
     expected_product_commit: str = "a" * 40,
     expected_product_tree: str = "b" * 40,
+    replace_gate: bool = False,
     resume_grant: bool = False,
     resume_grant_ttl: timedelta = timedelta(hours=1),
     resume_grant_product_tree: str = "b" * 40,
@@ -44,6 +45,7 @@ def _run(
         files[name].write_bytes(name.encode("ascii"))
     free = tmp_path / f"DustMirror-{tag}-FREE-win64.zip"; free.write_bytes(b"free")
     gui = tmp_path / f"DustMirror-{tag}-GUI-win64.zip"; gui.write_bytes(b"gui")
+    gate = tmp_path / "release-gate-manifest.json"; gate.write_bytes(b"gate")
     now = datetime.now(timezone.utc) + issued_offset
     payload = {
         "schema": "dustmirror.publication-authorization.v1",
@@ -59,7 +61,7 @@ def _run(
         "issued_at": now.isoformat().replace("+00:00", "Z"),
         "expires_at": (now + ttl).isoformat().replace("+00:00", "Z"),
         "targets": TARGETS,
-        "release_gate_manifest_sha256": "d" * 64,
+        "release_gate_manifest_sha256": _asset(gate)["sha256"],
         "controls": {name: _asset(path) for name, path in files.items()},
         "assets": {"FREE": _asset(free), "GUI": _asset(gui)},
     }
@@ -71,6 +73,8 @@ def _run(
     public = private.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
     if replace_control:
         files["trust.sig"].write_bytes(b"replaced")
+    if replace_gate:
+        gate.write_bytes(b"replaced")
     command = [
         sys.executable, str(SCRIPT), "--authorization", str(authorization),
         "--signature", str(signature), "--publication-public-key-b64", base64.b64encode(public).decode("ascii"),
@@ -81,6 +85,7 @@ def _run(
         "--expected-release-tree", "f" * 40, "--manifest", str(files["manifest.json"]),
         "--manifest-signature", str(files["manifest.sig"]), "--trust-metadata", str(files["trust.json"]),
         "--trust-signature", str(files["trust.sig"]), "--free-bundle", str(free), "--gui-bundle", str(gui),
+        "--release-gate-manifest", str(gate),
     ]
     if resume_grant:
         grant_issued = datetime.now(timezone.utc)
@@ -129,6 +134,12 @@ def test_rejects_replaced_trust_signature(tmp_path: Path):
     result = _run(tmp_path, replace_control=True)
     assert result.returncode == 2
     assert "control_digest_invalid" in result.stdout
+
+
+def test_rejects_replaced_release_gate_manifest(tmp_path: Path):
+    result = _run(tmp_path, replace_gate=True)
+    assert result.returncode == 2
+    assert "authorization_nonce_or_gate_invalid" in result.stdout
 
 
 def test_rejects_product_commit_or_tree_trigger_drift(tmp_path: Path):
