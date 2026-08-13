@@ -20,8 +20,8 @@ from pathlib import Path
 
 
 EXPECTED_PACKAGES = {
-    "cryptography": "46.0.7",
-    "cffi": "2.0.0",
+    "cryptography": "49.0.0",
+    "cffi": "2.1.1",
     "pycparser": "3.0",
 }
 EXPECTED_CRYPTOGRAPHY = EXPECTED_PACKAGES["cryptography"]
