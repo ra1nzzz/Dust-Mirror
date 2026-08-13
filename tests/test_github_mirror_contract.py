@@ -23,8 +23,13 @@ def test_mirror_has_exact_eight_authorized_assets_and_readback():
         "publication-authorization.sig",
         "_validate_remote_assets",
         "make_latest",
+        "target_commitish",
+        "release_commit",
+        "release_tree",
+        "_tag_commit_and_tree",
     ):
         assert marker in source
+    assert '"target_commitish": "main"' not in source
 
 
 def test_setup_docs_explain_the_single_github_credential():

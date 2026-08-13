@@ -28,14 +28,31 @@ GITHUB_TOKEN: "<只在CNB密钥仓保存，不要提交到代码仓>"
 `DUSTMIRROR_RELEASE_COORDINATOR_TOKEN` 或
 `DUSTMIRROR_RELEASE_COORDINATOR_PUBLIC_KEY_B64`。
 
-公开仓 `.cnb.yml` 通过 `imports` 读取这个密钥文件。流水线中的
+公开仓 `.cnb.yml` 只在确实调用 CNB/GitHub 写入或回读 API 的 stage 通过
+`imports` 读取这个密钥文件；下载、解包以及运行时准备阶段都没有密钥。流水线
+会先在仓库内创建被 Git 忽略的 `.release-ci-venv`，用完整依赖闭包和
+`--require-hashes` 安装签名验证运行时，并按 wheel `RECORD` 再核对实际模块
+文件。流水线中的
 `scripts/sync_github_release.py` 固定使用官方 `https://api.github.com` API
-和目标仓 `ra1nzzz/Dust-Mirror`，先以草稿/预发布状态创建或复用 Release，上传
-恰好八个已授权文件，逐个回下载并重算 SHA-256，全部一致后才设置为 latest。
+和目标仓 `ra1nzzz/Dust-Mirror`。它先创建或复用与同一 Product build 绑定的
+GitHub 草稿，只补传缺失文件，绝不删除、覆盖或重建已有文件；已有文件和补传
+文件都会重复下载并核对大小与 SHA-256。ZIP 上传采用定长分块流，不会把整个
+包读入内存；网络中断最多重试三次，并先回读同名远端资产判断上一次请求是否
+实际成功。随后草稿只会先转成非 latest 的
+prerelease。草稿的 `target_commitish` 必须是签名授权中的 `release_commit`
+精确 SHA；回读还会解析 GitHub tag 并核对其 commit 与 tree 同时等于授权中的
+`release_commit` / `release_tree`，不能使用会漂移的 `main`。
+
+CNB 的同 tag prerelease 也必须先完成相同的八文件验收。只有两端都处于已验证
+的非 latest 状态后，`scripts/promote_public_release.py` 才进入最终提升：先提升
+CNB，再提升 GitHub；GitHub 提升失败会立即把 CNB 恢复为非 latest。进程在两步
+之间被中断时，下一次同 Product build 调用会先修复断点再继续，不会删除、重建
+Release，也不会接受同名异字节资产。最终阶段会再次回读两端 latest 与完整资产。
 
 因此：
 
 - 不需要为观尘 GUI 配置任何公网页面地址；
 - 不需要生成新的“协调服务公钥”；
 - 不需要第二套发布签名私钥；
-- GitHub Token 只用于发布仓写入，CNB Token 只用于 CNB 主仓的既有门禁。
+- GitHub Token 只用于发布仓写入；CNB Token 还需具备公开 CNB 发布仓的
+  `repo-release:rw`，用于可补偿的 latest/non-latest 状态切换。
