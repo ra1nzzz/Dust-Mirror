@@ -5,15 +5,29 @@ import argparse
 import json
 import os
 import re
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.verify_cnb_release_inventory import (
+    verify_release_inventory,
+    verify_release_inventory_state,
+)
+
 SEMVER = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
+BUILD_ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
 
 def _get(url: str, token: str, *, allow_missing: bool = False):
-    req = urllib.request.Request(url, headers={"Accept": "application/json", "Authorization": f"token {token}"})
+    req = urllib.request.Request(
+        url,
+        headers={"Accept": "application/json", "Authorization": f"Bearer {token}"},
+    )
     try:
         with urllib.request.urlopen(req, timeout=30) as response:
             return json.load(response)
@@ -38,52 +52,127 @@ def _tag(value: dict) -> str:
     raise ValueError("release_response_tag_missing")
 
 
+def _is_prerelease(value: dict) -> bool:
+    return any(
+        value.get(key) is True for key in ("prerelease", "pre_release", "preRelease")
+    )
+
+
+def preflight_decision(
+    *,
+    endpoint: str,
+    token: str,
+    repo: str,
+    tag: str,
+    product_build_id: str,
+    authorization_path: Path,
+) -> dict:
+    """Return a fail-closed create/resume/resume-upload decision."""
+
+    if not BUILD_ID.fullmatch(product_build_id):
+        raise ValueError("product_build_id_invalid")
+    target_url = f"{endpoint}/{repo}/-/releases/tags/{tag}"
+    latest_url = f"{endpoint}/{repo}/-/releases/latest"
+    target = _get(target_url, token, allow_missing=True)
+    latest = _get(latest_url, token, allow_missing=True)
+    if target is None:
+        if latest is not None and _version(tag) <= _version(_tag(latest)):
+            raise ValueError("release_version_not_newer_than_latest")
+        return {"action": "create", "missing": []}
+    if not isinstance(target, dict) or _tag(target) != tag:
+        raise ValueError("existing_release_identity_invalid")
+    description = str(target.get("description") or target.get("body") or "").rstrip()
+    if not description.endswith(f"Product build: {product_build_id}"):
+        raise ValueError("release_not_owned_by_product_build")
+    target_is_latest = isinstance(latest, dict) and (
+        target.get("id") == latest.get("id") or _tag(latest) == tag
+    )
+    if target_is_latest:
+        if target.get("draft") is True or _is_prerelease(target):
+            raise ValueError("existing_latest_release_state_invalid")
+        verify_release_inventory(
+            endpoint=endpoint,
+            token=token,
+            repo=repo,
+            tag=tag,
+            product_build_id=product_build_id,
+            authorization_path=authorization_path,
+        )
+        # A hard interruption may occur after CNB promotion and before the
+        # GitHub commit/readback.  The dual promoter will validate, repair or
+        # finish that exact same-build split state; never create/overwrite.
+        return {"action": "resume", "missing": []}
+    if latest is not None and _version(tag) <= _version(_tag(latest)):
+        raise ValueError("release_version_not_newer_than_latest")
+    if target.get("draft") is True or not _is_prerelease(target):
+        raise ValueError("existing_release_is_not_resumable_prerelease")
+    inventory = verify_release_inventory_state(
+        endpoint=endpoint,
+        token=token,
+        repo=repo,
+        tag=tag,
+        product_build_id=product_build_id,
+        authorization_path=authorization_path,
+        allow_partial=True,
+    )
+    return {
+        "action": "resume_upload" if inventory["missing"] else "resume",
+        "missing": inventory["missing"],
+    }
+
+
+def preflight_action(**kwargs) -> str:
+    """Compatibility wrapper used by unit tests and external callers."""
+
+    return str(preflight_decision(**kwargs)["action"])
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=("preflight", "postflight"), required=True)
     parser.add_argument("--tag", required=True)
     parser.add_argument("--repo", required=True)
-    parser.add_argument("--output", type=Path)
+    parser.add_argument("--product-build-id", default="")
+    parser.add_argument("--authorization", type=Path)
+    parser.add_argument("--set-output", action="store_true")
     args = parser.parse_args()
     try:
         endpoint = os.environ.get("CNB_API_ENDPOINT", "").rstrip("/")
         token = os.environ.get("CNB_TOKEN", "")
         if endpoint != "https://api.cnb.cool" or not token:
             raise ValueError("trusted_cnb_api_environment_missing")
-        target_url = f"{endpoint}/{args.repo}/-/releases/tags/{args.tag}"
-        latest_url = f"{endpoint}/{args.repo}/-/releases/latest"
-        target = _get(target_url, token, allow_missing=True)
-        latest = _get(latest_url, token, allow_missing=True)
+        action = ""
         if args.mode == "preflight":
-            if target is not None:
-                raise ValueError("release_tag_already_exists")
-            if latest is not None and _version(args.tag) <= _version(_tag(latest)):
-                raise ValueError("release_version_not_newer_than_latest")
-            state = {
-                "schema": "dustmirror.cnb-release-preflight.v1",
-                "tag": args.tag,
-                "previous_latest_tag": _tag(latest) if isinstance(latest, dict) else None,
-                "previous_latest_id": latest.get("id") if isinstance(latest, dict) else None,
-            }
+            if args.authorization is None:
+                raise ValueError("publication_authorization_required")
+            decision = preflight_decision(
+                endpoint=endpoint,
+                token=token,
+                repo=args.repo,
+                tag=args.tag,
+                product_build_id=args.product_build_id,
+                authorization_path=args.authorization,
+            )
+            action = str(decision["action"])
         else:
+            target_url = f"{endpoint}/{args.repo}/-/releases/tags/{args.tag}"
+            latest_url = f"{endpoint}/{args.repo}/-/releases/latest"
+            target = _get(target_url, token, allow_missing=True)
+            latest = _get(latest_url, token, allow_missing=True)
             if not isinstance(target, dict) or not isinstance(latest, dict):
                 raise ValueError("published_release_missing")
             if target.get("id") != latest.get("id") or _tag(target) != args.tag or _tag(latest) != args.tag:
                 raise ValueError("published_release_is_not_latest")
-            state = {
-                "schema": "dustmirror.cnb-release-postflight.v1",
-                "tag": args.tag,
-                "release_id": target.get("id"),
-            }
-        if args.output:
-            args.output.write_text(
-                json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
-                encoding="utf-8",
-            )
     except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         print(json.dumps({"verified": False, "error": str(exc)}, sort_keys=True))
         return 2
-    print(json.dumps({"verified": True, "mode": args.mode, "tag": args.tag}, sort_keys=True))
+    result = {"verified": True, "mode": args.mode, "tag": args.tag}
+    if action:
+        result["action"] = action
+    print(json.dumps(result, sort_keys=True))
+    if args.set_output and action:
+        print(f"##[set-output release_action={action}]")
+        print(f"##[set-output missing_assets={','.join(decision.get('missing', []))}]")
     return 0
 
 

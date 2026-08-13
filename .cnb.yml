@@ -1,44 +1,114 @@
 main:
   api_trigger_publish_windows_release:
-    - imports:
-        - https://cnb.cool/yitaocn/dustmirror-release-secrets/-/blob/main/env.release.yml
-      lock:
+    - lock:
         key: dustmirror-public-windows-release
         expires: 72000
         wait: true
         timeout: 72000
       stages:
-        - name: Refuse non-Product trigger or malformed identity
+        - name: Refuse non-signer trigger and normalize the signed Product identity
           script: |
             set -eu
             test "$CNB_REPO_SLUG" = "yitaocn/dust-mirror"
-            test "$API_TRIGGER_REPO_SLUG" = "yitaocn/dustmirror"
-            echo "$RELEASE_VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'
+            test "$API_TRIGGER_REPO_SLUG" = "yitaocn/dustmirror-release-signer"
+            case "$PRODUCT_VERSION" in
+              v*) normalized_version="$PRODUCT_VERSION" ;;
+              *) normalized_version="v$PRODUCT_VERSION" ;;
+            esac
+            echo "$normalized_version" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
             echo "$PRODUCT_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
-            test -n "$PRODUCT_BUILD_ID"
-        - name: Download the private signed handoff from the exact Product commit
+            echo "$PRODUCT_TREE" | grep -Eq '^[0-9a-f]{40}$'
+            echo "$PRODUCT_BUILD_ID" | grep -Eq '^[A-Za-z0-9._-]{1,128}$'
+            echo "$PRODUCT_REQUEST_SHA256" | grep -Eq '^[0-9a-f]{64}$'
+            echo "$PRODUCT_RELEASE_LEDGER_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
+            echo "$PRODUCT_RELEASE_LEDGER_TREE" | grep -Eq '^[0-9a-f]{40}$'
+            test "$PRODUCT_HANDOFF_ATTACHMENT" = "DustMirror-candidate-handoff-$PRODUCT_BUILD_ID.zip"
+            test "$PRODUCT_VERIFIER_EVIDENCE_ATTACHMENT" = "DustMirror-verifier-evidence-$PRODUCT_REQUEST_SHA256.zip"
+            test "$CNB_COMMIT" = "$PRODUCT_RELEASE_LEDGER_COMMIT"
+            test "$(git rev-parse 'HEAD^{tree}')" = "$PRODUCT_RELEASE_LEDGER_TREE"
+            echo "##[set-output release_version=$normalized_version]"
+            if [ -n "${PUBLICATION_RESUME_GRANT_ID:-}" ]; then
+              echo "$PUBLICATION_RESUME_GRANT_ID" | grep -Eq '^[A-Za-z0-9._-]{1,128}$'
+            fi
+          exports:
+            release_version: RELEASE_VERSION
+        - name: Prepare the hash-locked verifier before importing any release secret
+          timeout: 15m
+          script: |
+            set -eu
+            rm -rf .release-ci-venv
+            python3 -m venv .release-ci-venv
+            ./.release-ci-venv/bin/python -m pip install --disable-pip-version-check --no-cache-dir --only-binary=:all: --require-hashes -r requirements-release-ci.txt
+            ./.release-ci-venv/bin/python scripts/verify_release_runtime.py --require-venv
+        - name: Download the exact handoff and independent verifier evidence from Product
           image: cnbcool/attachments@sha256:37c2d53fed9accee6ea0a509a05a4d05e4b36af37d5319451c2284e287b9e935
           settings:
             type: DOWNLOAD
             slug: yitaocn/dustmirror
             commit: $PRODUCT_COMMIT
             attachments:
-              - DustMirror-$RELEASE_VERSION-FREE-win64.zip
-              - DustMirror-$RELEASE_VERSION-GUI-win64.zip
-              - manifest.json
-              - manifest.sig
-              - trust.json
-              - trust.sig
-              - publication-authorization.json
-              - publication-authorization.sig
-        - name: Verify authorization and reject replay or downgrade before creating a Release
-          timeout: 10m
+              - $PRODUCT_HANDOFF_ATTACHMENT
+              - $PRODUCT_VERIFIER_EVIDENCE_ATTACHMENT
+        - name: Download a fresh signed resume-only grant when explicitly requested
+          if: |
+            [ -n "${PUBLICATION_RESUME_GRANT_ID:-}" ]
+          image: cnbcool/attachments@sha256:37c2d53fed9accee6ea0a509a05a4d05e4b36af37d5319451c2284e287b9e935
+          settings:
+            type: DOWNLOAD
+            slug: yitaocn/dustmirror
+            commit: $PRODUCT_COMMIT
+            attachments:
+              - DustMirror-publication-resume-grant-$PUBLICATION_RESUME_GRANT_ID.json
+              - DustMirror-publication-resume-grant-$PUBLICATION_RESUME_GRANT_ID.sig
+        - name: Safely extract only the authorized public files from the closed handoff
           script: |
             set -eu
-            python3 -m pip install --disable-pip-version-check -r requirements-release-ci.txt
-            python3 scripts/verify_publication_authorization.py --authorization publication-authorization.json --signature publication-authorization.sig --publication-public-key-b64 "$DUSTMIRROR_PUBLICATION_PUBLIC_KEY_B64" --expected-tag "$RELEASE_VERSION" --expected-product-build-id "$PRODUCT_BUILD_ID" --expected-cnb-repo "$CNB_REPO_SLUG" --expected-release-commit "$CNB_COMMIT" --expected-release-tree "$(git rev-parse 'HEAD^{tree}')" --manifest manifest.json --manifest-signature manifest.sig --trust-metadata trust.json --trust-signature trust.sig --free-bundle "DustMirror-${RELEASE_VERSION}-FREE-win64.zip" --gui-bundle "DustMirror-${RELEASE_VERSION}-GUI-win64.zip"
-            python3 scripts/verify_cnb_release_state.py --mode preflight --tag "$RELEASE_VERSION" --repo "$CNB_REPO_SLUG" --output release-preflight-state.json
+            rm -rf public-handoff product-verification
+            mkdir public-handoff product-verification
+            ./.release-ci-venv/bin/python scripts/extract_product_candidate_handoff.py --archive "$PRODUCT_HANDOFF_ATTACHMENT" --handoff-attachment "$PRODUCT_HANDOFF_ATTACHMENT" --output-directory public-handoff --verification-directory product-verification --tag "$RELEASE_VERSION" --product-build-id "$PRODUCT_BUILD_ID" --product-commit "$PRODUCT_COMMIT" --product-tree "$PRODUCT_TREE" --request-sha256 "$PRODUCT_REQUEST_SHA256" --release-ledger-commit "$PRODUCT_RELEASE_LEDGER_COMMIT" --release-ledger-tree "$PRODUCT_RELEASE_LEDGER_TREE"
+            mv public-handoff/* .
+            rmdir public-handoff
+            rm "$PRODUCT_HANDOFF_ATTACHMENT"
+            if [ -n "${PUBLICATION_RESUME_GRANT_ID:-}" ]; then
+              mv "DustMirror-publication-resume-grant-$PUBLICATION_RESUME_GRANT_ID.json" publication-resume-grant.json
+              mv "DustMirror-publication-resume-grant-$PUBLICATION_RESUME_GRANT_ID.sig" publication-resume-grant.sig
+            else
+              test ! -e publication-resume-grant.json
+              test ! -e publication-resume-grant.sig
+            fi
+        - name: Verify authorization and reject replay or downgrade before creating a Release
+          imports:
+            - https://cnb.cool/yitaocn/dustmirror-release-secrets/-/blob/main/env.release.yml
+          timeout: 1h
+          script: |
+            set -eu
+            set --
+            if [ -n "${PUBLICATION_RESUME_GRANT_ID:-}" ]; then
+              test -s publication-resume-grant.json
+              test -s publication-resume-grant.sig
+              set -- --resume-grant publication-resume-grant.json --resume-grant-signature publication-resume-grant.sig
+            fi
+            ./.release-ci-venv/bin/python scripts/verify_publication_authorization.py --authorization publication-authorization.json --signature publication-authorization.sig --publication-public-key-b64 "$DUSTMIRROR_PUBLICATION_PUBLIC_KEY_B64" --expected-tag "$RELEASE_VERSION" --expected-product-build-id "$PRODUCT_BUILD_ID" --expected-product-commit "$PRODUCT_COMMIT" --expected-product-tree "$PRODUCT_TREE" --expected-cnb-repo "$CNB_REPO_SLUG" --expected-release-commit "$PRODUCT_RELEASE_LEDGER_COMMIT" --expected-release-tree "$PRODUCT_RELEASE_LEDGER_TREE" --release-gate-manifest product-verification/release-gate-manifest.json --manifest manifest.json --manifest-signature manifest.sig --trust-metadata trust.json --trust-signature trust.sig --free-bundle "DustMirror-${RELEASE_VERSION}-FREE-win64.zip" --gui-bundle "DustMirror-${RELEASE_VERSION}-GUI-win64.zip" --set-output "$@"
+            ./.release-ci-venv/bin/python scripts/verify_product_verifier_evidence.py --signer-result product-verification/signer-result.json --signer-result-signature product-verification/signer-result.sig --release-gate-manifest product-verification/release-gate-manifest.json --verifier-evidence-manifest product-verification/verifier-evidence-manifest.json --verifier-archive "$PRODUCT_VERIFIER_EVIDENCE_ATTACHMENT" --publication-public-key-b64 "$DUSTMIRROR_PUBLICATION_PUBLIC_KEY_B64" --expected-tag "$RELEASE_VERSION" --expected-product-build-id "$PRODUCT_BUILD_ID" --expected-product-commit "$PRODUCT_COMMIT" --expected-product-tree "$PRODUCT_TREE" --expected-request-sha256 "$PRODUCT_REQUEST_SHA256" --expected-release-ledger-commit "$PRODUCT_RELEASE_LEDGER_COMMIT" --expected-release-ledger-tree "$PRODUCT_RELEASE_LEDGER_TREE" --expected-verifier-attachment "$PRODUCT_VERIFIER_EVIDENCE_ATTACHMENT"
+            rm -rf product-verification "$PRODUCT_VERIFIER_EVIDENCE_ATTACHMENT"
+            ./.release-ci-venv/bin/python scripts/verify_cnb_release_state.py --mode preflight --tag "$RELEASE_VERSION" --repo "$CNB_REPO_SLUG" --product-build-id "$PRODUCT_BUILD_ID" --authorization publication-authorization.json --set-output
+          exports:
+            release_action: PUBLIC_RELEASE_ACTION
+            missing_assets: PUBLIC_RELEASE_MISSING_ASSETS
+            publication_resume_only: PUBLICATION_RESUME_ONLY
+        - name: Enforce that a fresh resume grant can never create a Release
+          script: |
+            set -eu
+            case "$PUBLICATION_RESUME_ONLY" in
+              false) ;;
+              true)
+                test "$PUBLIC_RELEASE_ACTION" = "resume" -o "$PUBLIC_RELEASE_ACTION" = "resume_upload"
+                ;;
+              *) exit 2 ;;
+            esac
         - name: Create a non-latest prerelease only after authorization succeeds
+          if: |
+            [ "$PUBLIC_RELEASE_ACTION" = "create" ]
           type: git:release
           options:
             tag: $RELEASE_VERSION
@@ -47,6 +117,8 @@ main:
             preRelease: true
             latest: false
         - name: Upload only the eight authorized files
+          if: |
+            [ "$PUBLIC_RELEASE_ACTION" = "create" ]
           image: cnbcool/attachments@sha256:37c2d53fed9accee6ea0a509a05a4d05e4b36af37d5319451c2284e287b9e935
           settings:
             tag: $RELEASE_VERSION
@@ -59,50 +131,38 @@ main:
               - trust.sig
               - publication-authorization.json
               - publication-authorization.sig
+        - name: Resume only the verified missing CNB attachments without overwrite
+          imports:
+            - https://cnb.cool/yitaocn/dustmirror-release-secrets/-/blob/main/env.release.yml
+          if: |
+            [ "$PUBLIC_RELEASE_ACTION" = "resume_upload" ]
+          timeout: 1h
+          script: |
+            set -eu
+            test -n "$PUBLIC_RELEASE_MISSING_ASSETS"
+            ./.release-ci-venv/bin/python scripts/resume_cnb_release_upload.py --authorization publication-authorization.json --tag "$RELEASE_VERSION" --repo "$CNB_REPO_SLUG" --product-build-id "$PRODUCT_BUILD_ID" --expected-missing "$PUBLIC_RELEASE_MISSING_ASSETS"
         - name: Reject any missing, duplicate or extra prerelease attachment
+          imports:
+            - https://cnb.cool/yitaocn/dustmirror-release-secrets/-/blob/main/env.release.yml
+          if: |
+            [ "$PUBLIC_RELEASE_ACTION" = "create" ]
           script: |
             set -eu
-            python3 scripts/verify_cnb_release_inventory.py --authorization publication-authorization.json --tag "$RELEASE_VERSION" --repo "$CNB_REPO_SLUG" --product-build-id "$PRODUCT_BUILD_ID"
-        - name: Stage the exact bytes in a GitHub draft
+            ./.release-ci-venv/bin/python scripts/verify_cnb_release_inventory.py --authorization publication-authorization.json --tag "$RELEASE_VERSION" --repo "$CNB_REPO_SLUG" --product-build-id "$PRODUCT_BUILD_ID"
+        - name: Prepare both hosts and commit the recoverable two-host promotion
+          imports:
+            - https://cnb.cool/yitaocn/dustmirror-release-secrets/-/blob/main/env.release.yml
           timeout: 1h
           script: |
             set -eu
             test -n "$GITHUB_TOKEN"
-            python3 scripts/sync_github_release.py --mode stage --tag "$RELEASE_VERSION" --output github-mirror-staged.json
-            test -s github-mirror-staged.json
-        - name: Promote the verified CNB release to latest
-          type: git:release
-          options:
-            tag: $RELEASE_VERSION
-            preRelease: false
-            latest: true
-            overlying: true
-        - name: Promote the already-verified GitHub draft
-          timeout: 1h
+            ./.release-ci-venv/bin/python scripts/promote_public_release.py --tag "$RELEASE_VERSION" --repo "$CNB_REPO_SLUG" --product-build-id "$PRODUCT_BUILD_ID" --authorization publication-authorization.json --output dual-promotion-receipt.json
+            test -s dual-promotion-receipt.json
+        - name: Read back both live latest states and the complete CNB inventory
+          imports:
+            - https://cnb.cool/yitaocn/dustmirror-release-secrets/-/blob/main/env.release.yml
           script: |
             set -eu
-            test -n "$GITHUB_TOKEN"
-            python3 scripts/sync_github_release.py --mode promote --tag "$RELEASE_VERSION" --output github-mirror-receipt.json
-            test -s github-mirror-receipt.json
-        - name: Read back the live CNB latest state and complete inventory
-          script: |
-            set -eu
-            python3 scripts/verify_cnb_release_state.py --mode postflight --tag "$RELEASE_VERSION" --repo "$CNB_REPO_SLUG"
-            python3 scripts/verify_cnb_release_inventory.py --authorization publication-authorization.json --tag "$RELEASE_VERSION" --repo "$CNB_REPO_SLUG" --product-build-id "$PRODUCT_BUILD_ID"
-            python3 scripts/sync_github_release.py --mode verify --tag "$RELEASE_VERSION" --output github-mirror-postflight.json
-        # CNB documents failStages as the failure-only compensation path.
-        # Never delete or move a tag: make a partially promoted candidate
-        # non-latest and restore the previously recorded CNB latest release.
-      failStages:
-        - name: Roll back any partially promoted public release
-          script: |
-            set +e
-            python3 scripts/sync_github_release.py --mode rollback --tag "$RELEASE_VERSION" --output github-mirror-rollback.json
-            github_status=$?
-            python3 scripts/rollback_cnb_release.py --tag "$RELEASE_VERSION" --repo "$CNB_REPO_SLUG" --product-build-id "$PRODUCT_BUILD_ID" --preflight-state release-preflight-state.json
-            cnb_status=$?
-            if [ "$github_status" -ne 0 ] || [ "$cnb_status" -ne 0 ]; then
-              echo "CRITICAL: public release compensation did not fully converge" >&2
-              exit 1
-            fi
-            echo "Candidate is non-latest on both public endpoints after failure"
+            ./.release-ci-venv/bin/python scripts/verify_cnb_release_state.py --mode postflight --tag "$RELEASE_VERSION" --repo "$CNB_REPO_SLUG"
+            ./.release-ci-venv/bin/python scripts/verify_cnb_release_inventory.py --authorization publication-authorization.json --tag "$RELEASE_VERSION" --repo "$CNB_REPO_SLUG" --product-build-id "$PRODUCT_BUILD_ID"
+            ./.release-ci-venv/bin/python scripts/sync_github_release.py --mode verify --tag "$RELEASE_VERSION" --product-build-id "$PRODUCT_BUILD_ID" --authorization publication-authorization.json --output github-mirror-receipt.json
