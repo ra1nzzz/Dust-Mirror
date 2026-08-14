@@ -56,3 +56,7 @@ Release，也不会接受同名异字节资产。最终阶段会再次回读两�
 - 不需要第二套发布签名私钥；
 - GitHub Token 只用于发布仓写入；CNB Token 还需具备公开 CNB 发布仓的
   `repo-release:rw`，用于可补偿的 latest/non-latest 状态切换。
+
+仓库分叉、历史发布实验及本发布仓双端 ancestry 的收敛记录统一保存在
+[Dev 项目知识库](https://github.com/ra1nzzz/DustMirror-Dev/blob/master/docs/99-%E5%BD%92%E6%A1%A3/%E4%BB%93%E5%BA%93%E6%B2%BB%E7%90%86/BRANCH_CONSOLIDATION_2026-08-14.md)。
+本仓不另建第二份项目状态或分支台账。
